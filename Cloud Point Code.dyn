@@ -1,0 +1,186 @@
+{
+  "Uuid": "f3e2d180-8462-49e9-9a51-c8e8a0b12085",
+  "IsCustomNode": false,
+  "Description": "",
+  "Name": "Ejercicio 12",
+  "ElementResolver": {
+    "ResolutionMap": {}
+  },
+  "Inputs": [],
+  "Outputs": [],
+  "Nodes": [
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "NodeType": "PythonScriptNode",
+      "Code": "import clr\r\nimport System\r\n\r\nclr.AddReference('RevitAPI')\r\nfrom Autodesk.Revit.DB import *\r\nfrom Autodesk.Revit.DB.Structure import *\r\n\r\nclr.AddReference('RevitAPIUI')\r\nfrom Autodesk.Revit.UI import *\r\n\r\nclr.AddReference('System')\r\nfrom System.Collections.Generic import List\r\n\r\nclr.AddReference('RevitNodes')\r\nimport Revit\r\nclr.ImportExtensions(Revit.GeometryConversion)\r\nclr.ImportExtensions(Revit.Elements)\r\n\r\nclr.AddReference('RevitServices')\r\nimport RevitServices\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\nimport sys\r\nsys.path.append(r'C:\\Users\\EXCELTIC427\\Documents\\FUNCIONES DYNAMO')\r\n\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\nuidoc=DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\r\n\r\n\r\ndef  enumerados_familias_vista():\r\n    #obtenemos los valores de enumerado de los tipos de vista, así como sus nombres \r\n    #el resultado de tipos es un integral, y el de names un string. \r\n    tipos = System.Enum.GetValues(ViewFamily)\r\n    nombres = System.Enum.GetNames(ViewFamily)\r\n    \r\n    claves = [str(x) for x in tipos]\r\n    #creamos un diccionario asignando cada clave al nombre correspondiente\r\n    return dict(zip(claves, nombres))\r\n    \r\n\r\ndef tipo_vista_nombre_familia(nombre):\r\n    \"\"\"\r\n    Uso:\r\n        Seleccionar tipo de familia devista segun \r\n        su nombre\r\n    Input:\r\n        Nombre de tipo de familia de vista <str>\r\n    Output:\r\n        Tipo de familia de vista <ViewFamilyType>\r\n    \"\"\"\r\n    #creamos un colector con todas las familias de vista \r\n    tiposFamiliaVistas = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()\r\n\r\n    #si el lenguaje es cpython, creamos una lista con los elementos que coincidan con el nombre de busqueda de la función. solo nos hace falta quedarnos con un elemento. \r\n    if sys.implementation.name == 'cpython':\r\n        tipoVista = [x for x in tiposFamiliaVistas if enumerados_familias_vista()[str(x.ViewFamily)] == nombre][0]\r\n    \r\n\r\n    else:\r\n        tipoVista = [x for x in tiposFamiliaVistas if str(x.ViewFamily) == nombre][0]\r\n    \r\n    return tipoVista\r\n    \r\n\r\nsectionBoxSize = UnwrapElement(IN[0])\r\n\r\n#a través de un colector, creamos una variable con la(s) nube(s) de puntos\r\npointclouds = FilteredElementCollector(doc).OfClass(PointCloudInstance).ToElements()\r\n\r\nif pointclouds:\r\n    scanPoints = []\r\n    for pointcloud in pointclouds:\r\n        #podemos usar el comando \"GetScans\" para obtener los diferentes escaneos. \r\n        scans = pointcloud.GetScans()\r\n        for s in scans:\r\n            #el comando \"GetScanOrigin\" nos ayuda a encontrar el punto de origen del escaneo. \r\n            scanPoints.append(pointcloud.GetScanOrigin(s))\r\n    \r\n    #utilizamos la funcion del principio para encontrar el tipo de vista tridimensional     \r\n    tipoVista = tipo_vista_nombre_familia('ThreeDimensional')\r\n    #determinamos si el numero de puntos del escaneo tiene 1 cifra, 2, 3...  \r\n    numPuntos = len(str(len(scanPoints)))\r\n    #creamos una lista vacía que iremos llenando con tantas vistas como puntos de vista haya \r\n    vistas = []\r\n    \r\n    TransactionManager.Instance.EnsureInTransaction(doc)\r\n    exito=0\r\n    for i in range(len(scanPoints)):\r\n        try:\r\n            #crearemos tantas vistas como número de puntos de escaneo\r\n            vista = View3D.CreateIsometric(doc, tipoVista.Id)\r\n            vistas.append(vista)\r\n            #creamos un bounding box\r\n            bBox = BoundingBoxXYZ() \r\n            #el punto mínimo es el punto de origen y le añadimos la mitad del tamaño de la caja, pero en negativo. Al punto máximo habrá que añadirselo en positivo.         \r\n            pMin = scanPoints[i].Add(XYZ(-sectionBoxSize/2, -sectionBoxSize/2, -sectionBoxSize/2))\r\n            pMax = scanPoints[i].Add(XYZ(sectionBoxSize/2, sectionBoxSize/2, sectionBoxSize/2))\r\n            #seteamos el punto mínimo y el máximo \r\n            bBox.Min = pMin\r\n            bBox.Max = pMax\r\n            \r\n            #le añadimos una section box con nuestra bounding box a la vista que estamos creando \r\n            vista.SetSectionBox(bBox)\r\n            \r\n            #para saber cuantos ceros poner al nombre, determinamos que el número de ceros depende de cuantas cifras tenga nuestro numero de puntos (1 cifra, 2 cifras...) y del número de rango en el que estemos. Supongamos que tenemos 20 escaneos (2 cifras) y estamos en el escaneo número 5. 2-1=1 cero. Si estuvieramos en el escaneo 12 (2 cifras) 2-2=0 ceros. \r\n            zeros = numPuntos - len(str(i))\r\n            \r\n            #aplicamos el nombre \r\n            vista.Name = 'EDITECA - PointCloudScan_' + ('0'*zeros)+ str(i)\r\n            exito+=1\r\n        except: \r\n            pass\r\n    \r\n    TransactionManager.Instance.TransactionTaskDone()\r\n    mensajeSalida = 'Se han creado {} vistas 3D para los puntos de escaneo'.format(exito)\r\n\r\n\r\n\r\nelse:\r\n    mensajeSalida = 'No existen instancias de NDP en el documento'\r\n\r\n\r\n\r\n\r\nOUT = mensajeSalida",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "6270c3c8c7b0404998fde14a983e0ae9",
+      "Inputs": [
+        {
+          "Id": "0e7d6041545747809925c4d1bffd5415",
+          "Name": "IN[0]",
+          "Description": "Input #0",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Outputs": [
+        {
+          "Id": "614a211bba364f909bfafa0bedf8709d",
+          "Name": "OUT",
+          "Description": "Resultado de la secuencia de comandos de Python",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    },
+    {
+      "ConcreteType": "CoreNodeModels.Input.DoubleSlider, CoreNodeModels",
+      "NodeType": "NumberInputNode",
+      "NumberType": "Double",
+      "MaximumValue": 5.0,
+      "MinimumValue": 0.0,
+      "StepValue": 0.5,
+      "InputValue": 5.0,
+      "Id": "cd3fddb602b248efbcf843cd8d7e1484",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "8e5da2dfdc1c44c68348f63361fb91d4",
+          "Name": "",
+          "Description": "Double",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "A slider that produces numeric values."
+    },
+    {
+      "ConcreteType": "PythonNodeModels.PythonNode, PythonNodeModels",
+      "NodeType": "PythonScriptNode",
+      "Code": "import clr\r\nimport System\r\n\r\nclr.AddReference('RevitAPI')\r\nfrom Autodesk.Revit.DB import *\r\nfrom Autodesk.Revit.DB.Structure import *\r\n\r\nclr.AddReference('RevitAPIUI')\r\nfrom Autodesk.Revit.UI import *\r\n\r\nclr.AddReference('System')\r\nfrom System.Collections.Generic import List\r\n\r\nclr.AddReference('RevitNodes')\r\nimport Revit\r\nclr.ImportExtensions(Revit.GeometryConversion)\r\nclr.ImportExtensions(Revit.Elements)\r\n\r\nclr.AddReference('RevitServices')\r\nimport RevitServices\r\nfrom RevitServices.Persistence import DocumentManager\r\nfrom RevitServices.Transactions import TransactionManager\r\n\r\nimport sys\r\nsys.path.append(r'C:\\Users\\EXCELTIC427\\Documents\\FUNCIONES DYNAMO')\r\n\r\ndoc = DocumentManager.Instance.CurrentDBDocument\r\nuidoc=DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument\r\n\r\ntipos = System.Enum.GetValues(ViewFamily)\r\nnombres = System.Enum.GetNames(ViewFamily)\r\n    \r\n\r\n\r\nOUT =type(tipos[6]), type(nombres[6])",
+      "Engine": "CPython3",
+      "EngineName": "CPython3",
+      "VariableInputPorts": true,
+      "Id": "6d277f69e9574206bce239a93b853c7b",
+      "Inputs": [],
+      "Outputs": [
+        {
+          "Id": "fe36fa712f464395bac6e65aa145fae1",
+          "Name": "OUT",
+          "Description": "Result of the python script",
+          "UsingDefaultValue": false,
+          "Level": 2,
+          "UseLevels": false,
+          "KeepListStructure": false
+        }
+      ],
+      "Replication": "Disabled",
+      "Description": "Runs an embedded Python script."
+    }
+  ],
+  "Connectors": [
+    {
+      "Start": "8e5da2dfdc1c44c68348f63361fb91d4",
+      "End": "0e7d6041545747809925c4d1bffd5415",
+      "Id": "ea7a959904f54c79993f3b5a4d15b222",
+      "IsHidden": "False"
+    }
+  ],
+  "Dependencies": [],
+  "NodeLibraryDependencies": [],
+  "Thumbnail": "",
+  "GraphDocumentationURL": null,
+  "ExtensionWorkspaceData": [
+    {
+      "ExtensionGuid": "28992e1d-abb9-417f-8b1b-05e053bee670",
+      "Name": "Properties",
+      "Version": "2.12",
+      "Data": {}
+    },
+    {
+      "ExtensionGuid": "DFBD9CC0-DB40-457A-939E-8C8555555A9D",
+      "Name": "Generative Design",
+      "Version": "1.10",
+      "Data": {}
+    }
+  ],
+  "Author": "",
+  "Linting": {
+    "activeLinter": "None",
+    "activeLinterId": "7b75fb44-43fd-4631-a878-29f4d5d8399a",
+    "warningCount": 0,
+    "errorCount": 0
+  },
+  "Bindings": [],
+  "View": {
+    "Dynamo": {
+      "ScaleFactor": 1.0,
+      "HasRunWithoutCrash": true,
+      "IsVisibleInDynamoLibrary": true,
+      "Version": "2.16.2.5624",
+      "RunType": "Manual",
+      "RunPeriod": "1000"
+    },
+    "Camera": {
+      "Name": "Background Preview",
+      "EyeX": -17.0,
+      "EyeY": 24.0,
+      "EyeZ": 50.0,
+      "LookX": 12.0,
+      "LookY": -13.0,
+      "LookZ": -58.0,
+      "UpX": 0.0,
+      "UpY": 1.0,
+      "UpZ": 0.0
+    },
+    "ConnectorPins": [],
+    "NodeViews": [
+      {
+        "Name": "Python Script",
+        "ShowGeometry": true,
+        "Id": "6270c3c8c7b0404998fde14a983e0ae9",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "X": 630.0,
+        "Y": 309.0
+      },
+      {
+        "Name": "Number Slider",
+        "ShowGeometry": true,
+        "Id": "cd3fddb602b248efbcf843cd8d7e1484",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "X": 203.0,
+        "Y": 308.0
+      },
+      {
+        "Name": "Python Script",
+        "ShowGeometry": true,
+        "Id": "6d277f69e9574206bce239a93b853c7b",
+        "IsSetAsInput": false,
+        "IsSetAsOutput": false,
+        "Excluded": false,
+        "X": 923.614608395218,
+        "Y": 271.36209988073517
+      }
+    ],
+    "Annotations": [],
+    "X": -45.225735438084826,
+    "Y": 125.90918510559976,
+    "Zoom": 0.88920302202503554
+  }
+}
